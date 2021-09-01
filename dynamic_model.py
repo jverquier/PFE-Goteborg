@@ -87,7 +87,11 @@ class DynamicFlightModel(object):
         self.u = np.zeros_like(np.arrange(self.time[0],self.time[-1],dt))
         self.w = np.zeros_like(np.arrange(self.time[0],self.time[-1],dt))
         
-    def indice_debut
+    def indice_debut(self,sal,temp,pres,lon,lat,ballast,pitch,profile,navresource):
+        i=0
+        while (np.isfinite(sal[i]+temp[i]+pres[i]+lon[i]+lat[i]+ballast[i]+pitch[i])==False):
+            i+=1
+        return i
         
     def compute_inverted_mass_matrix(self, pitch):
         C2 = np.cos(pitch)**2
