@@ -6,7 +6,7 @@ Created on Tue Aug 31 17:18:05 2021
 """
 
 import numpy as np
-import panda as pd
+import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
 import gsw
@@ -39,24 +39,44 @@ def date2float(d, epoch=pd.to_datetime(0, utc=True, origin='unix', cache='False'
 class DynamicFlightModel(object):
     def __init__(self,time,sal,temp,pres,lon,lat,ballast,pitch,profile,navresource):
         #Data acquired by the glider durong flight
+        #Fill gaps between data(interpolate)
+        def fillGaps(x,y):
+            f = interp1d(x[np.isfinite(x+y)],y[np.isfinite(x+y)], bounds_error=False, fill_value=np.NaN)
+            return(f(x))
+        
         self.timestamp = time
         self.time = date2float(self.timestamp)
-        self.pressure = pres
-        self.longitude = lon
-        self.latitude = lat
-        self.profile = profile
-        self.temperature = temp
-        self.salinity = sal
-        self.ballast = ballast/1000000 # m^3
-        self.pitch = np.deg2rad(pitch) # rad
+        self.pressure = fillGaps(self.time, pres)
+        self.longitude = fillGaps(self.time, lon)
+        self.latitude = fillGaps(self.time, lat)
+        self.profile = fillGaps(self.time, lat)
+        self.temperature = fillGaps(self.time, temp)
+        self.salinity = fillGaps(self.time, sal)
+        self.ballast = fillGaps(self.time, ballast/1000000) # m^3
+        self.pitch = fillGaps(self.time, np.deg2rad(pitch)) # rad
         
-        #Correstion to some data        
+        #calculation of some data        
         self.depth = gsw.z_from_p(self.pressure,self.latitude) # m . Note depth (Z) is negative, so diving is negative dZdt
         self.dZdt = np.gradient(self.depth,self.time) # m.s-1
         self.g = gsw.grav(self.latitude,self.pressure)       
         self.SA = gsw.SA_from_SP(self.salinity, self.pressure, self.longitude, self.latitude)
         self.CT = gsw.CT_from_t(self.SA, self.temperature, self.pressure)
         self.rho = gsw.rho(self.SA, self.CT, self.pressure)
+        
+        #First and last index to fompute flight from
+        def indice_debut(sal,temp,pres,lon,lat,ballast,pitch,profile,navresource):
+            i=0
+            while (np.isfinite(sal[i]+temp[i]+pres[i]+lon[i]+lat[i]+ballast[i]+pitch[i])==False):
+                i+=1
+            return i
+        self.first_index=indice_debut(sal,temp,pres,lon,lat,ballast,pitch,profile,navresource)
+        
+        def indice_fin(sal,temp,pres,lon,lat,ballast,pitch,profile,navresource):
+            i=-1
+            while (np.isfinite(sal[i]+temp[i]+pres[i]+lon[i]+lat[i]+ballast[i]+pitch[i])==False):
+                i=i-1
+            return i
+        self.last_index=indice_fin(sal,temp,pres,lon,lat,ballast,pitch,profile,navresource)
         
         #Drone parameters
         self.AR = 7
@@ -69,16 +89,18 @@ class DynamicFlightModel(object):
         self.Vg=59.015 / 1000
         self.comp_p=4.5e-06
         self.comp_t=-6.5e-05
-        self.Cd_0=0.11781
-        self.Cd_1=2.94683
+        self.Cd0=0.11781
+        self.Cd1=2.94683
         self.aw= 3.82807
         self.ah= 3.41939
         self.S=0.09
 
         #Drone speed to be determined
         self.dt = 1
-        self.u = np.zeros_like(np.arrange(self.time[0],self.time[-1],dt))
-        self.w = np.zeros_like(np.arrange(self.time[0],self.time[-1],dt))
+        #self.t=np.arange(self.time[self.first_index],self.time[self.last_index],self.dt)
+        self.t=np.arange(self.time[self.first_index],self.time[self.first_index]+10000,self.dt)
+        self.u = np.zeros_like(self.t)
+        self.w = np.zeros_like(self.t)
         
     def compute_inverted_mass_matrix(self, pitch):
         C2 = np.cos(pitch)**2
@@ -96,6 +118,10 @@ class DynamicFlightModel(object):
         return Fb, Fg
     
     def compute_lift_and_drag(self, pitch, rho, u, w):
+        if u>1:
+            u=1
+        if w>1:
+            w=1
         U = np.sqrt(u**2 + w**2)
         alpha = np.arctan2(w,u) - pitch
         q = 0.5 * rho * self.S * U**2
@@ -103,40 +129,38 @@ class DynamicFlightModel(object):
         D = q * (self.Cd0 + self.Cd1*alpha**2)
         return L, D
             
-    def f(self, t, u, w):
+    def F(self, t, u, w):
         pitch=np.interp(t, self.time, self.pitch)
         pressure=np.interp(t, self.time, self.pressure)
         ballast=np.interp(t, self.time, self.ballast)
         rho=np.interp(t, self.time, self.rho)
         g=np.interp(t, self.time, self.g)
-        T=np.interp(t, self.time, self.T)
+        temperature=np.interp(t, self.time, self.temperature)
         
         M11, M12, M21, M22 = self.compute_inverted_mass_matrix(pitch)
         Fb, Fg = self.compute_FB_and_Fg(g, rho, pressure, ballast, temperature)
         L, D=self.compute_lift_and_drag(pitch, rho, u, w)
         alpha = np.arctan2(w,u) - pitch
         
-        Fx=np.sin(pitch + alpha)*L-cos(pitch + alpha)*D
-        Fy=Fb - Fg -cos(pitch + alpha)*L -sin(pitch + alpha)*D
-        
+        Fx=np.sin(pitch + alpha)*L-np.cos(pitch + alpha)*D
+        Fy=Fb - Fg -np.cos(pitch + alpha)*L -np.sin(pitch + alpha)*D
         return ( M11*Fx + M12*Fy )
     
-    def g(self, t, u, w):
+    def G(self, t, u, w):
         pitch=np.interp(t, self.time, self.pitch)
         pressure=np.interp(t, self.time, self.pressure)
         ballast=np.interp(t, self.time, self.ballast)
         rho=np.interp(t, self.time, self.rho)
         g=np.interp(t, self.time, self.g)
-        T=np.interp(t, self.time, self.T)
+        temperature=np.interp(t, self.time, self.temperature)
         
         M11, M12, M21, M22 = self.compute_inverted_mass_matrix(pitch)
         Fb, Fg = self.compute_FB_and_Fg(g, rho, pressure, ballast, temperature)
         L, D=self.compute_lift_and_drag(pitch, rho, u, w)
         alpha = np.arctan2(w,u) - pitch
         
-        Fx=np.sin(pitch + alpha)*L-cos(pitch + alpha)*D
-        Fy=Fb - Fg -cos(pitch + alpha)*L -sin(pitch + alpha)*D
-        
+        Fx=np.sin(pitch + alpha)*L-np.cos(pitch + alpha)*D
+        Fy=Fb - Fg -np.cos(pitch + alpha)*L -np.sin(pitch + alpha)*D
         return ( M21*Fx + M22*Fy )
   
     
@@ -152,27 +176,26 @@ class DynamicFlightModel(object):
             
     def solveRK4(self):
         dt=self.dt
-        t=np.arrange(self.time[0],self.time[-1],dt) #????
-        nt=t.size        
+        t=self.t
+        nt=len(t)
         for k in range(nt-1):
-            k1_u=dt*self.f(t[k], u[k], w[k])
-            k1_w=dt*self.g(t[k], u[k], w[k])
+            u=self.u[k]
+            w=self.w[k]
             
-            k2_u=dt*self.f(t[k]+dt/2, u[k]+k1_u/2, w[k]+k1_w/2)
-            k2_w=dt*self.g(t[k]+dt/2, u[k]+k1_u/2, w[k]+k1_w/2)
+            k1_u=dt*self.F(t[k], u, w)
+            k1_w=dt*self.G(t[k], u, w)
             
-            k3_u=dt*self.f(t[k]+dt/2, u[k]+k2_u/2, w[k]+k2_w/2)
-            k3_w=dt*self.g(t[k]+dt/2, u[k]+k2_u/2, w[k]+k2_w/2)
+            k2_u=dt*self.F(t[k]+dt/2, u+k1_u/2, w+k1_w/2)
+            k2_w=dt*self.G(t[k]+dt/2, u+k1_u/2, w+k1_w/2)
             
-            k4_u=dt*self.f(t[k]+dt, u[k]+k3_u, w[k]+k3_w) 
-            k4_w=dt*self.g(t[k]+dt, u[k]+k3_u, w[k]+k3_w) 
+            k3_u=dt*self.F(t[k]+dt/2, u+k2_u/2, w+k2_w/2)
+            k3_w=dt*self.G(t[k]+dt/2, u+k2_u/2, w+k2_w/2)
+            
+            k4_u=dt*self.F(t[k]+dt, u+k3_u, w+k3_w) 
+            k4_w=dt*self.G(t[k]+dt, u+k3_u, w+k3_w) 
             
             du=(k1_u +2*k2_u + 2*k3_u + k4_u)/6
-            u[k+1]=u[k]+du
+            self.u[k+1]=self.u[k]+du
             
             dw=(k1_w +2*k2_w + 2*k3_w + k4_w)/6
-            w[k+1]=w[k]+dw
-            
-            
-        
-        
+            self.w[k+1]=self.w[k]+dw
