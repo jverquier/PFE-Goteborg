@@ -10,6 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
 import gsw
+from tqdm import tqdm
 
 
 #Define general model   
@@ -86,19 +87,19 @@ class DynamicFlightModel(object):
         self.mg=60.772
         self.m11=0.2*60.772
         self.m22=0.92*60.772
-        self.Vg=59.015 / 1000
-        self.comp_p=4.5e-06
-        self.comp_t=-6.5e-05
-        self.Cd0=0.11781
-        self.Cd1=2.94683
+        self.Vg=0.05947062400832888
+        self.comp_p=5.4459542481259674e-06
+        self.comp_t=-2.8025987632281052e-05
+        self.Cd0=0.1360775344330183
+        self.Cd1=3.477573934000217
         self.aw= 3.82807
         self.ah= 3.41939
         self.S=0.09
 
         #Drone speed to be determined
-        self.dt = 1
+        self.dt = 0.5
         #self.t=np.arange(self.time[self.first_index],self.time[self.last_index],self.dt)
-        self.t=np.arange(self.time[self.first_index],self.time[self.first_index]+10000,self.dt)
+        self.t=np.arange(1.59846038e+09, 1.59846038e+09 + 30000,self.dt)
         self.u = np.zeros_like(self.t)
         self.w = np.zeros_like(self.t)
         
@@ -118,10 +119,6 @@ class DynamicFlightModel(object):
         return Fb, Fg
     
     def compute_lift_and_drag(self, pitch, rho, u, w):
-        if u>1:
-            u=1
-        if w>1:
-            w=1
         U = np.sqrt(u**2 + w**2)
         alpha = np.arctan2(w,u) - pitch
         q = 0.5 * rho * self.S * U**2
@@ -178,7 +175,7 @@ class DynamicFlightModel(object):
         dt=self.dt
         t=self.t
         nt=len(t)
-        for k in range(nt-1):
+        for k in tqdm(range(nt-1)):
             u=self.u[k]
             w=self.w[k]
             
@@ -194,8 +191,9 @@ class DynamicFlightModel(object):
             k4_u=dt*self.F(t[k]+dt, u+k3_u, w+k3_w) 
             k4_w=dt*self.G(t[k]+dt, u+k3_u, w+k3_w) 
             
-            du=(k1_u +2*k2_u + 2*k3_u + k4_u)/6
+            du=(k1_u +2*k2_u + 2*k3_u + k4_u)/6 
             self.u[k+1]=self.u[k]+du
             
             dw=(k1_w +2*k2_w + 2*k3_w + k4_w)/6
             self.w[k+1]=self.w[k]+dw
+            
