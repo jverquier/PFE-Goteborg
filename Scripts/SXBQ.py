@@ -202,17 +202,31 @@ class SlocumModel(object):
         self.eOsborne = 0.8
         self.Cd1_hull = 2.1
         self.Omega = 0.75
-
-        self.param_reference = dict({
+        
+        """
             'mass': 60.772, # Vehicle mass in kg
             'vol0': 59.015 / 1000, # Reference volume in m**3, with ballast at 0 (with -500 to 500 range), at surface pressure and 20 degrees C
             'area_w': 0.09, # Wing surface area, m**2
             'Cd_0': 0.11781, #
             'Cd_1': 2.94683, #
+            
             'Cl_w': 3.82807, # 
             'Cl_h': 3.41939, # 
+            
+            'Cl': 7.24746, # 
             'comp_p': 4.5e-06, # Pressure dependent hull compression factor
             'comp_t': -6.5e-05 # Temperature dependent hull compression factor
+        """
+
+        self.param_reference = dict({
+            'mass': 60.772, # Vehicle mass in kg
+            'vol0': 59.015 / 1000, # Reference volume in m**3, with ballast at 0 (with -500 to 500 range), at surface pressure and 20 degrees C
+            'area_w': 0.24, # Wing surface area, m**2
+            'Cd_0': 0.11781/2.666666667, #
+            'Cd_1': 2.94683/2.666666667, # 
+            'Cl': 7.24746/2.666666667, # 
+            'comp_p': 4.5e-06, # Pressure dependent hull compression factor
+            'comp_t': 6.5e-05 # Temperature dependent hull compression factor
         })
 
         self.param = self.param_reference.copy()
@@ -267,29 +281,29 @@ class SlocumModel(object):
         self._valid[np.abs(self.pitch) < 0.2] = False   # TODO change back to 15
         self._valid[np.abs(self.pitch) > 0.6] = False   # TODO change back to 15
         self._valid[np.abs(np.gradient(self.dZdt,self.time)) > 0.0005] = False # Accelerations
-        self._valid[np.gradient(self.pitch,self.time)==0] = False
+        self._valid[np.gradient(self.pitch,self.time)==0] = False # Rotation
         self._valid = self._valid & ((navresource == 100) | (navresource == 117) )
         
         # Do first pass regression on vol parameters, or volume and hydro?
-        self.regression_parameters = ('vol0','Cd_0','Cd_1','comp_p','comp_t') 
+        self.regression_parameters = ('vol0','Cd_0','Cd_1','Cl','comp_p','comp_t') 
         #('vol0','comp_p','comp_t','Cd_0','Cd_1','Cl_h','Cl_w') # Has to be a tuple, requires a trailing comma if single element
 
     ### Principal forces
     @property
     def F_B(self):
-        return self.g * self.rho * (self.ballast + self.vol0 * (1 - self.comp_p*self.pressure - self.comp_t*(self.temperature-10)))
+        return self.g * self.rho * (self.ballast + self.vol0 * (1 - self.comp_p*self.pressure + self.comp_t*(self.temperature-10)))
 
     @property
     def F_g(self):
         return self.mass * self.g
-
+    
     @property
     def F_L(self):
-        return self.dynamic_pressure * (self.Cd_1) * self.alpha
+        return self.dynamic_pressure * (self.Cl) * self.alpha
 
     @property
     def F_D(self):
-        return self.dynamic_pressure * (self.Cd_0 + self.Cd_1 * self.alpha**2)
+        return self.dynamic_pressure * (  self.Cd_0 + self.Cd_1 *(self.alpha**2)  )
 
     @property
     def Pa(self):
@@ -320,7 +334,7 @@ class SlocumModel(object):
         return _interp_fn(np.abs(self.pitch)) * np.sign(self.pitch)
 
     def _equation_alpha(self, _alpha, _pitch):
-        return (self.Cd_0 + self.Cd_1 * _alpha**2) / ( (self.Cd_1) * np.tan(_alpha + _pitch)) - _alpha
+        return (self.Cd_0 + self.Cd_1 * _alpha**2) / ( (self.Cl) * np.tan(_alpha + _pitch)) - _alpha
 
     def _solve_speed(self):
         _dynamic_pressure = (self.F_B - self.F_g) * np.sin(self.glide_angle) / (self.Cd_0 + self.Cd_1 * self.alpha**2)
@@ -338,7 +352,7 @@ class SlocumModel(object):
         for _istep, _key in enumerate(self.regression_parameters):
             self.param[_key] = x_initial[_istep] * self.param_reference[_key]
         self.model_function()
-        return np.sqrt( np.nanmean( self.w_H2O[self._valid]**2 ) ) 
+        return np.sqrt( np.nanmean( self.w_H2O[self._valid]**2 )) 
     
     def regress(self):
         x_initial = [self.param[_key] / self.param_reference[_key] for _istep,_key in enumerate(self.regression_parameters)]
@@ -346,7 +360,7 @@ class SlocumModel(object):
         print('Non-optimised score: '+str(self.cost_function(x_initial)) )
         print('Regressing...')
 
-        R = fmin(self.cost_function, x_initial, disp=True, full_output=True, maxiter=500)
+        R = fmin(self.cost_function, x_initial, disp=True, full_output=True, maxiter=1000)
         for _istep,_key in enumerate(self.regression_parameters):
             self.param[_key] = R[0][_istep] * self.param_reference[_key]
         
@@ -386,6 +400,10 @@ class SlocumModel(object):
         #Cd1_hull = self.Cd1_hull
         #return Cd1_w + Cd1_hull
         return self.param['Cd_1']
+    
+    @property        
+    def Cl(self):
+        return self.param['Cl']
     
     #@property        
     #def Cl_w(self):
@@ -558,7 +576,6 @@ class SeagliderModel(object):
 
     def model_function(self):
         self.alpha, self.speed = self._flightvec()
-        
         self.speed_vert = np.sin(self.glide_angle)*self.speed
         self.speed_horz = np.cos(self.glide_angle)*self.speed
 
@@ -566,7 +583,7 @@ class SeagliderModel(object):
         for _istep, _key in enumerate(self.regression_parameters):
             self.param[_key] = x_initial[_istep] * self.param_reference[_key]
         self.model_function()
-        return np.sqrt( np.nanmean( self.w_H2O[self._valid[self._dives]]**2 ) ) 
+        return np.sqrt( np.nanmean( self.w_H2O[self._valid[self._dives]]**2 ) )  
     
     def regress(self):
         _dnum = np.ceil(self.profile/2)
