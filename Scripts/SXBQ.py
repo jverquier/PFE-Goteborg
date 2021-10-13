@@ -342,8 +342,8 @@ class SlocumModel(object):
         _interp_fn = interp1d(_pitch_range,_alpha_range)
         return _interp_fn(np.abs(self.pitch)) * np.sign(self.pitch)
     
-    
     """
+    
     def _solve_alpha(self):
         _pitch_range = np.linspace( np.deg2rad(0), np.deg2rad(90) , 100)
         _alpha_range1 = np.zeros_like(_pitch_range)

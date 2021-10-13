@@ -149,7 +149,7 @@ class SteadyState_2_Model(object):
         self._valid[np.abs(self.pitch) > 0.6] = False   # TODO change back to 15
         self._valid[np.abs(np.gradient(self.dZdt,self.time)) > 0.0005] = False # Accelerations
         self._valid[np.gradient(self.pitch,self.time)==0] = False # Rotation
-        self._valid = self._valid & ((self.navresource == 100) | (self.navresource == 117) ) #100=glider going down & 117=glider going up (=> not at surface or inflecting)
+        self._valid = self._valid & ((navresource == 100) | (navresource == 117) ) #100=glider going down & 117=glider going up (=> not at surface or inflecting)
         
         #self._valid[np.abs(self.pitch) < 0.55] = False   
         #self._valid[np.abs(self.pitch) > 0.57] = False   
@@ -288,7 +288,7 @@ class SteadyState_2_Model(object):
     def model_function(self):
         self.alpha = self._solve_alpha()
         self.speed = self._solve_speed()
-        #self.speed [ (self.pressure < 5) & ((self.navresource == 115)|(self.navresource == 116)) ] = 0 #Set speed to be zero at the surface
+        self.speed [ (self.pressure < 5) & ((self.navresource == 115)|(self.navresource == 116)) ] = 0 #Set speed to be zero at the surface
         self.speed_vert = np.sin(self.glide_angle)*self.speed
         self.speed_horz = np.cos(self.glide_angle)*self.speed 
         #self.Apply_lowpass_filter()#------------------------------------------------------!!!!!!!!!!!!!!!!!!!!
