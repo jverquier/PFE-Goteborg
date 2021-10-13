@@ -197,6 +197,8 @@ class SlocumModel(object):
         
         self.ballast = ballast/1000000 # m^3
         self.pitch = np.deg2rad(pitch) # rad
+        
+        self.navresource=navresource
 
         self.AR = 7
         self.eOsborne = 0.8
@@ -282,7 +284,7 @@ class SlocumModel(object):
         self._valid[np.abs(self.pitch) > 0.6] = False   # TODO change back to 15
         self._valid[np.abs(np.gradient(self.dZdt,self.time)) > 0.0005] = False # Accelerations
         self._valid[np.gradient(self.pitch,self.time)==0] = False # Rotation
-        self._valid = self._valid & ((navresource == 100) | (navresource == 117) )
+        self._valid = self._valid & ((self.navresource == 100) | (self.navresource == 117) )
         
         # Do first pass regression on vol parameters, or volume and hydro?
         self.regression_parameters = ('vol0','Cd_0','Cd_1','Cl','comp_p','comp_t') 
@@ -322,8 +324,15 @@ class SlocumModel(object):
     def w_H2O(self):
         # Water column upwelling
         return self.dZdt - self.speed_vert
+    
+    
+        
+    @property
+    def vert_dir(self):
+        return np.sign(self.F_B-self.F_g) #Positive is buoyancy force up & negative is buoyancy force down
 
     ### Basic equations
+    """
     def _solve_alpha(self):
         _pitch_range = np.linspace( np.deg2rad(0), np.deg2rad(90) , 100)
         _alpha_range = np.zeros_like(_pitch_range)
@@ -332,7 +341,36 @@ class SlocumModel(object):
             _alpha_range[_istep] = _tmp[0]
         _interp_fn = interp1d(_pitch_range,_alpha_range)
         return _interp_fn(np.abs(self.pitch)) * np.sign(self.pitch)
-
+    
+    
+    """
+    def _solve_alpha(self):
+        _pitch_range = np.linspace( np.deg2rad(0), np.deg2rad(90) , 100)
+        _alpha_range1 = np.zeros_like(_pitch_range)
+        _alpha_range2 = np.zeros_like(_pitch_range)      
+        #Résolution vol normal
+        for _istep, _pitch in enumerate(_pitch_range):
+            _tmp = fsolve(self._equation_alpha, 0.001, args=(_pitch), full_output=True)
+            _alpha_range1[_istep] = _tmp[0]
+        
+        #Résolution décrochage
+        for _istep, _pitch in enumerate(_pitch_range):
+            if (np.sign(_pitch)>0) :
+                _tmp = fsolve(self._equation_alpha, (-np.pi/2 -_pitch + 0.0001), args=(_pitch), full_output=True)
+                _alpha_range2[_istep] = _tmp[0]
+            else :
+                _tmp = fsolve(self._equation_alpha, (np.pi/2 -_pitch - 0.0001), args=(_pitch), full_output=True)
+                _alpha_range2[_istep] = _tmp[0]
+            
+        _interp_fn1 = interp1d(_pitch_range,_alpha_range1)
+        _interp_fn2 = interp1d(_pitch_range,_alpha_range2)
+        
+        Res=_interp_fn1(np.abs(self.pitch)) * np.sign(self.pitch) #Résolution noramle
+        Res[self.vert_dir*np.sign(self.pitch)<0]=(_interp_fn2(np.abs(self.pitch)) * np.sign(self.pitch))[self.vert_dir*np.sign(self.pitch)<0] #Résolution décrochage
+        return Res
+    
+    
+    
     def _equation_alpha(self, _alpha, _pitch):
         return (self.Cd_0 + self.Cd_1 * _alpha**2) / ( (self.Cl) * np.tan(_alpha + _pitch)) - _alpha
 
@@ -345,6 +383,7 @@ class SlocumModel(object):
     def model_function(self):
         self.alpha = self._solve_alpha()
         self.speed = self._solve_speed()
+        self.speed [ (self.pressure < 5) & ((self.navresource == 115)|(self.navresource == 116)) ] = 0 #Set speed to be zero at the surface
         self.speed_vert = np.sin(self.glide_angle)*self.speed
         self.speed_horz = np.cos(self.glide_angle)*self.speed
 

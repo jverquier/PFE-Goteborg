@@ -46,6 +46,8 @@ class SteadyState_2_Model(object):
         self.ballast = ballast/1000000 # m^3
         self.pitch = np.deg2rad(pitch) # rad
         
+        self.navresource=navresource
+        
         self.tau=tau
         self.adcp_speed=adcp_speed
         
@@ -145,12 +147,14 @@ class SteadyState_2_Model(object):
         self._valid[self.pressure < 5] = False
         self._valid[np.abs(self.pitch) < 0.2] = False   # TODO change back to 15
         self._valid[np.abs(self.pitch) > 0.6] = False   # TODO change back to 15
-        #self._valid[np.abs(self.pitch) < 0.55] = False   
-        #self._valid[np.abs(self.pitch) > 0.57] = False   
         self._valid[np.abs(np.gradient(self.dZdt,self.time)) > 0.0005] = False # Accelerations
         self._valid[np.gradient(self.pitch,self.time)==0] = False # Rotation
-        self._valid = self._valid & ((navresource == 100) | (navresource == 117) )
-        self._valid[self.vert_dir*np.sign(self.pitch)< 0] = False   #Stall
+        self._valid = self._valid & ((self.navresource == 100) | (self.navresource == 117) ) #100=glider going down & 117=glider going up (=> not at surface or inflecting)
+        
+        #self._valid[np.abs(self.pitch) < 0.55] = False   
+        #self._valid[np.abs(self.pitch) > 0.57] = False   
+        #self._valid[self.vert_dir*np.sign(self.pitch)< 0] = False   #Stall
+        
         
         # Do first pass regression on vol parameters, or volume and hydro?
         self.regression_parameters = ('vol0','Cd_0','Cd_1','Cl','comp_p','comp_t') 
@@ -225,7 +229,7 @@ class SteadyState_2_Model(object):
             _alpha_range[_istep] = _tmp[0]
             
         _interp_fn = interp1d(_pitch_range,_alpha_range)
-        return _interp_fn(np.abs(self.pitch)) * np.sign(self.pitch)
+        return _interp_fn(np.abs(self.pitch)) * np.sign(self.pitch)    
     """
     
     
@@ -249,8 +253,7 @@ class SteadyState_2_Model(object):
     def _solve_alpha(self):
         _pitch_range = np.linspace( np.deg2rad(0), np.deg2rad(90) , 100)
         _alpha_range1 = np.zeros_like(_pitch_range)
-        _alpha_range2 = np.zeros_like(_pitch_range)
-        
+        _alpha_range2 = np.zeros_like(_pitch_range)      
         #Résolution vol normal
         for _istep, _pitch in enumerate(_pitch_range):
             _tmp = fsolve(self._equation_alpha, 0.001, args=(_pitch), full_output=True)
@@ -285,6 +288,7 @@ class SteadyState_2_Model(object):
     def model_function(self):
         self.alpha = self._solve_alpha()
         self.speed = self._solve_speed()
+        #self.speed [ (self.pressure < 5) & ((self.navresource == 115)|(self.navresource == 116)) ] = 0 #Set speed to be zero at the surface
         self.speed_vert = np.sin(self.glide_angle)*self.speed
         self.speed_horz = np.cos(self.glide_angle)*self.speed 
         #self.Apply_lowpass_filter()#------------------------------------------------------!!!!!!!!!!!!!!!!!!!!
