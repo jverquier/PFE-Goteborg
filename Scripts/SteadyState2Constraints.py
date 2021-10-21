@@ -75,7 +75,8 @@ class SteadyState_2_Model(object):
             'SSStau': 18.5 #characteristic response time of the glider in sec
         """
         
-
+        
+        #For the first set of data :
         self.param_reference = dict({
             'mass': 60.772, # Vehicle mass in kg
             'vol0': 0.05944908141441475, # Reference volume in m**3, with ballast at 0 (with -500 to 500 range), at surface pressure and 20 degrees C
@@ -96,6 +97,31 @@ class SteadyState_2_Model(object):
             
             'SSStau': 18.5 #characteristic response time of the glider in sec
         })
+        
+        
+        """  
+        #For the second set of data :
+        self.param_reference = dict({
+            'mass': 60.772, # Vehicle mass in kg
+            'vol0': 0.059516188313651484, # Reference volume in m**3, with ballast at 0 (with -500 to 500 range), at surface pressure and 20 degrees C
+            'area_w': 0.24, # Wing surface area, m**2
+            
+            'Cd_0': 0.07386659009159255, #
+            'Cd_1': 0.34783408917512537, # 
+            
+            'Cd': 0.05, #Cd is nly used to determine the Cd(alpha) curve
+            
+            'Cl': 1.8805894442146223, # Negative because wrong convention on theta
+            
+            'alpha_stall': 10, #
+            'alpha_linear': 10, #
+              
+            'comp_p': 4.052789561765741e-06, # Pressure dependent hull compression factor
+            'comp_t': 4.753268947701921e-05, # Temperature dependent hull compression factor
+            
+            'SSStau': 18.5 #characteristic response time of the glider in sec
+        })
+        """
 
         self.param = self.param_reference.copy()
         for k,v in param.items():
