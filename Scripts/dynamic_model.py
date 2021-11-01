@@ -38,7 +38,7 @@ def date2float(d, epoch=pd.to_datetime(0, utc=True, origin='unix', cache='False'
     return (d - epoch).dt.total_seconds()   
         
 class DynamicFlightModel(object):
-    def __init__(self,time,sal,temp,pres,lon,lat,ballast,pitch, profile, navresource, adcp_speed, **param):
+    def __init__(self,time,sal,internal_temp,external_temp,pres,lon,lat,ballast,pitch, profile, navresource, adcp_speed, **param):
         #Data acquired by the glider during flight
         #Fill gaps between data(interpolate)
         def fillGaps(x,y):
@@ -53,7 +53,8 @@ class DynamicFlightModel(object):
         self.longitude = fillGaps(self.time, lon) 
         self.latitude = fillGaps(self.time, lat) 
         self.profile = fillGaps(self.time, lat) 
-        self.temperature = fillGaps(self.time, temp) 
+        self.internal_temperature = fillGaps(self.time, internal_temp) 
+        self.external_temperature = fillGaps(self.time, external_temp) 
         self.salinity = fillGaps(self.time, sal) 
         self.ballast = fillGaps(self.time, ballast/1000000) # m^3
         self.pitch =fillGaps(self.time, np.deg2rad(pitch)) # rad
@@ -62,34 +63,33 @@ class DynamicFlightModel(object):
         self.dZdt = np.gradient(self.depth,self.time) # m.s-1
         self.g = gsw.grav(self.latitude,self.pressure)       
         self.SA = gsw.SA_from_SP(self.salinity, self.pressure, self.longitude, self.latitude)
-        self.CT = gsw.CT_from_t(self.SA, self.temperature, self.pressure)
+        self.CT = gsw.CT_from_t(self.SA, self.external_temperature, self.pressure)
         self.rho = gsw.rho(self.SA, self.CT, self.pressure)
         
         self.adcp_speed = fillGaps(self.time, adcp_speed)
         
         
-        
-        #First and last index to fompute flight from
-        def indice_debut(sal,temp,pres,lon,lat,ballast,pitch,profile,navresource):
+        #First and last index to compute flight from
+        def indice_debut(sal,external_temp,pres,lon,lat,ballast,pitch,profile,navresource):
             i=0
-            while (np.isfinite(sal[i]+temp[i]+pres[i]+lon[i]+lat[i]+ballast[i]+pitch[i])==False):
+            while (np.isfinite(sal[i]+external_temp[i]+pres[i]+lon[i]+lat[i]+ballast[i]+pitch[i])==False):
                 i+=1
             return i
-        self.first_index=indice_debut(sal,temp,pres,lon,lat,ballast,pitch,profile,navresource)
+        self.first_index=indice_debut(sal,external_temp,pres,lon,lat,ballast,pitch,profile,navresource)
         
-        def indice_fin(sal,temp,pres,lon,lat,ballast,pitch,profile,navresource):
+        def indice_fin(sal,external_temp,pres,lon,lat,ballast,pitch,profile,navresource):
             i=-1
-            while (np.isfinite(sal[i]+temp[i]+pres[i]+lon[i]+lat[i]+ballast[i]+pitch[i])==False):
+            while (np.isfinite(sal[i]+external_temp[i]+pres[i]+lon[i]+lat[i]+ballast[i]+pitch[i])==False):
                 i=i-1
             return i
-        self.last_index=indice_fin(sal,temp,pres,lon,lat,ballast,pitch,profile,navresource)
+        self.last_index=indice_fin(sal,external_temp,pres,lon,lat,ballast,pitch,profile,navresource)
         
         
         #Time of solving
-        self.dt = 0.5
+        self.dt = 0.1
         #self.t=np.arange(self.time[self.first_index],self.time[self.last_index],self.dt)
         #self.t=np.arange(1598460380, 1598478740,self.dt)
-        self.t=np.arange(1598472681, 1598474516, self.dt)
+        self.t=np.arange(1598558200, 1598560030, self.dt)
         self.u = np.zeros_like(self.t)
         self.w = np.zeros_like(self.t)
         
@@ -109,17 +109,17 @@ class DynamicFlightModel(object):
         
         self.param_reference = dict({
             'mg': 60.772, # Vehicle mass in kg
-            'm11':3.5,
-            'm22':90,
-            'Vg': 0.05944908141441475, # Reference volume in m**3, with ballast at 0 (with -500 to 500 range), at surface pressure and 20 degrees C
+            'm11':2.405,
+            'm22':62.59,
+            'Vg': 0.05944919244909694, # Reference volume in m**3, with ballast at 0 (with -500 to 500 range), at surface pressure and 20 degrees C
             'S': 0.24, # Wing surface area, m**2
-            'Cd0': 0.04675839293615225, #
-            'Cd1': 2.149734099962422, #
-            'Cl': 1.9419712004293288, #
+            'Cd0': 0.046601172003459146, #
+            'Cd1': 2.2846652475518, #
+            'Cl': 1.9551684905403062, #
             'alpha_stall': 10, #
             'alpha_linear': 10, #
-            'comp_p': 4.723279317627415e-06, # Pressure dependent hull compression factor
-            'comp_t': 8.676627535570479e-05 # Temperature dependent hull compression factor
+            'comp_p': 4.702895408506633e-06, # Pressure dependent hull compression factor
+            'comp_t': 8.898950889070907e-05 # Temperature dependent hull compression factor
         })
 
         self.param = self.param_reference.copy()
@@ -233,7 +233,7 @@ class DynamicFlightModel(object):
         return M11, M12, M21, M22
     
     def compute_FB_and_Fg(self, g, rho, pressure, ballast, temperature):
-        Fb=g*rho*(ballast + self.Vg * (1 - self.comp_p*pressure + self.comp_t*(temperature-10)))
+        Fb=g*rho*(ballast + self.Vg * (1 - self.comp_p*(pressure-0.8) + self.comp_t*(temperature-10)))
         Fg=self.mg*g
         return Fb, Fg
     
@@ -251,10 +251,12 @@ class DynamicFlightModel(object):
         ballast=np.interp(t, self.time, self.ballast)
         rho=np.interp(t, self.time, self.rho)
         g=np.interp(t, self.time, self.g)
-        temperature=np.interp(t, self.time, self.temperature)
+        internal_temperature=np.interp(t, self.time, self.internal_temperature)
+        external_temperature=np.interp(t, self.time, self.external_temperature)
+        
         
         M11, M12, M21, M22 = self.compute_inverted_mass_matrix(pitch)
-        Fb, Fg = self.compute_FB_and_Fg(g, rho, pressure, ballast, temperature)
+        Fb, Fg = self.compute_FB_and_Fg(g, rho, pressure, ballast, external_temperature)
         L, D=self.compute_lift_and_drag(pitch, rho, u, w)
         alpha = np.arctan2(w,u) - pitch
         
@@ -268,10 +270,11 @@ class DynamicFlightModel(object):
         ballast=np.interp(t, self.time, self.ballast)
         rho=np.interp(t, self.time, self.rho)
         g=np.interp(t, self.time, self.g)
-        temperature=np.interp(t, self.time, self.temperature)
+        internal_temperature=np.interp(t, self.time, self.internal_temperature)
+        external_temperature=np.interp(t, self.time, self.external_temperature)
         
         M11, M12, M21, M22 = self.compute_inverted_mass_matrix(pitch)
-        Fb, Fg = self.compute_FB_and_Fg(g, rho, pressure, ballast, temperature)
+        Fb, Fg = self.compute_FB_and_Fg(g, rho, pressure, ballast, external_temperature)
         L, D=self.compute_lift_and_drag(pitch, rho, u, w)
         alpha = np.arctan2(w,u) - pitch
         

@@ -222,7 +222,7 @@ class SlocumModel(object):
 
         self.param_reference = dict({
             'mass': 60.772, # Vehicle mass in kg
-            'vol0': 59.015 / 1000, # Reference volume in m**3, with ballast at 0 (with -500 to 500 range), at surface pressure and 20 degrees C
+            'vol0': 59.540 / 1000, # Reference volume in m**3, with ballast at 0 (with -500 to 500 range), at surface pressure and 20 degrees C
             'area_w': 0.24, # Wing surface area, m**2
             'Cd_0': 0.11781/2.666666667, #
             'Cd_1': 2.94683/2.666666667, # 
@@ -287,6 +287,7 @@ class SlocumModel(object):
         self._valid = self._valid & ((self.navresource == 100) | (self.navresource == 117) )
         
         # Do first pass regression on vol parameters, or volume and hydro?
+        #self.regression_parameters = ('vol0','Cd_0','Cd_1','Cl','comp_p')
         self.regression_parameters = ('vol0','Cd_0','Cd_1','Cl','comp_p','comp_t') 
         #('vol0','comp_p','comp_t','Cd_0','Cd_1','Cl_h','Cl_w') # Has to be a tuple, requires a trailing comma if single element
 

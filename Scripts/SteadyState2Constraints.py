@@ -31,16 +31,20 @@ def fillGaps(x,y):
 
 #New Steady State model (With adcp constraint)
 class SteadyState_2_Model(object):
-    def __init__(self,time,sal,temp,pres,lon,lat,ballast,pitch,profile,navresource,tau,adcp_speed,**param):
+    def __init__(self,time,sal, temp_ext, temp_int, pres_ext, pres_int, lon,lat,ballast,pitch,profile,navresource,tau,adcp_speed,**param):
         
         self.timestamp = time
         self.time = date2float(self.timestamp)
-        self.pressure = pres
+        
+        self.external_pressure = pres_ext
+        self.internal_pressure = pres_int
+        self.external_temperature = temp_ext
+        self.internal_temperature = temp_int
+        
         self.longitude = lon
         self.latitude = lat
         self.profile = profile
         
-        self.temperature = temp
         self.salinity = sal
         
         self.ballast = ballast/1000000 # m^3
@@ -54,7 +58,6 @@ class SteadyState_2_Model(object):
         
   
         """
-        
             'mass': 60.772, # Vehicle mass in kg
             'vol0': 0.05945962561711446, # Reference volume in m**3, with ballast at 0 (with -500 to 500 range), at surface pressure and 20 degrees C
             'area_w': 0.24, # Wing surface area, m**2
@@ -79,27 +82,29 @@ class SteadyState_2_Model(object):
         #For the first set of data :
         self.param_reference = dict({
             'mass': 60.772, # Vehicle mass in kg
-            'vol0': 0.05944908141441475, # Reference volume in m**3, with ballast at 0 (with -500 to 500 range), at surface pressure and 20 degrees C
+            'vol0': 0.05944919244909694, # Reference volume in m**3, with ballast at 0 (with -500 to 500 range), at surface pressure and 20 degrees C
             'area_w': 0.24, # Wing surface area, m**2
             
-            'Cd_0': 0.04675839293615225, #
-            'Cd_1': 2.149734099962422, # 
+            'Cd_0': 0.046601172003459146, #
+            'Cd_1': 2.2846652475518, # 
             
             'Cd': 0.05, #Cd is nly used to determine the Cd(alpha) curve
             
-            'Cl': 1.9419712004293288, # Negative because wrong convention on theta
+            'Cl': 1.9551684905403062, # Negative because wrong convention on theta
             
             'alpha_stall': 10, #
             'alpha_linear': 10, #
               
-            'comp_p': 4.723279317627415e-06, # Pressure dependent hull compression factor
-            'comp_t': 8.676627535570479e-05, # Temperature dependent hull compression factor
+            'comp_p': 4.702895408506633e-06, #1.023279317627415e-06, #Pressure dependent hull compression factor
+            'comp_t': 8.898950889070907e-05, #1.5665248101730484e-04, # Temperature dependent hull compression factor
             
             'SSStau': 18.5 #characteristic response time of the glider in sec
         })
         
         
-        """  
+        
+        """
+        
         #For the second set of data :
         self.param_reference = dict({
             'mass': 60.772, # Vehicle mass in kg
@@ -109,9 +114,9 @@ class SteadyState_2_Model(object):
             'Cd_0': 0.07386659009159255, #
             'Cd_1': 0.34783408917512537, # 
             
-            'Cd': 0.05, #Cd is nly used to determine the Cd(alpha) curve
+            'Cd': 0.05, #Cd is only used to determine the Cd(alpha) curve
             
-            'Cl': 1.8805894442146223, # Negative because wrong convention on theta
+            'Cl': 1.8805894442146223, 
             
             'alpha_stall': 10, #
             'alpha_linear': 10, #
@@ -122,6 +127,8 @@ class SteadyState_2_Model(object):
             'SSStau': 18.5 #characteristic response time of the glider in sec
         })
         """
+        
+        
 
         self.param = self.param_reference.copy()
         for k,v in param.items():
@@ -148,16 +155,16 @@ class SteadyState_2_Model(object):
         #self.temperature = smooth(RM(self.temperature,5),20)
         #self.salinity = smooth(RM(self.salinity,5),20)
         
-        self.depth = gsw.z_from_p(self.pressure,self.latitude) # m . Note depth (Z) is negative, so diving is negative dZdt
+        self.depth = gsw.z_from_p(self.external_pressure,self.latitude) # m . Note depth (Z) is negative, so diving is negative dZdt
         self.dZdt = np.gradient(self.depth,self.time) # m.s-1
-        self.dZdt = smooth(self.dZdt, 50) #Smooth noisy value --------------------------------------- !!!!!!!------!!!!!!
+        self.dZdt = smooth(self.dZdt, 40) #Smooth noisy value --------------------------------------- !!!!!!!------!!!!!!
         
 
-        self.g = gsw.grav(self.latitude,self.pressure)
+        self.g = gsw.grav(self.latitude,self.external_pressure)
         
-        self.SA = gsw.SA_from_SP(self.salinity, self.pressure, self.longitude, self.latitude)
-        self.CT = gsw.CT_from_t(self.SA, self.temperature, self.pressure)
-        self.rho = gsw.rho(self.SA, self.CT, self.pressure)
+        self.SA = gsw.SA_from_SP(self.salinity, self.external_pressure, self.longitude, self.latitude)
+        self.CT = gsw.CT_from_t(self.SA, self.external_temperature, self.external_pressure)
+        self.rho = gsw.rho(self.SA, self.CT, self.external_pressure)
 
         ### Basic model
         # Relies on steady state assumption that buoyancy, weight, drag and lift cancel out when not accelerating.
@@ -170,7 +177,7 @@ class SteadyState_2_Model(object):
         
         ### Get good datapoints to regress over
         self._valid = np.full(np.shape(self.pitch),True)
-        self._valid[self.pressure < 5] = False
+        self._valid[self.external_pressure < 5] = False
         self._valid[np.abs(self.pitch) < 0.2] = False   # TODO change back to 15
         self._valid[np.abs(self.pitch) > 0.6] = False   # TODO change back to 15
         self._valid[np.abs(np.gradient(self.dZdt,self.time)) > 0.0005] = False # Accelerations
@@ -183,7 +190,8 @@ class SteadyState_2_Model(object):
         
         
         # Do first pass regression on vol parameters, or volume and hydro?
-        self.regression_parameters = ('vol0','Cd_0','Cd_1','Cl','comp_p','comp_t') 
+        #self.regression_parameters = ('vol0','Cd_0','Cd_1','Cl','comp_p','comp_t') 
+        self.regression_parameters = ('vol0',) 
         #self.regression_parameters = ('SSStau',) 
         #('vol0','comp_p','comp_t','Cd_0','Cd_1','Cl_h','Cl_w') # Has to be a tuple, requires a trailing comma if single element
 
@@ -193,7 +201,8 @@ class SteadyState_2_Model(object):
     ### Principal forces
     @property
     def F_B(self):
-        return self.g * self.rho * (self.ballast + self.vol0 * (1 - self.comp_p*self.pressure + self.comp_t*(self.temperature-10)))
+        return self.g * self.rho * (self.ballast + self.vol0 * (1 - self.comp_p*(self.external_pressure-0.8) + self.comp_t*(self.external_temperature-10)))
+        #return self.g * self.rho * (self.ballast + self.vol0 * (1 - self.comp_p*(self.external_pressure) + self.comp_t*(self.internal_temperature-10)))
 
     @property
     def F_g(self):
@@ -214,7 +223,7 @@ class SteadyState_2_Model(object):
 
     @property
     def Pa(self):
-        return self.pressure * 10000 # Pa
+        return self.external_pressure * 10000 # Pa
 
     ### Important variables
     @property
@@ -232,11 +241,13 @@ class SteadyState_2_Model(object):
     
     @property
     def U_H2O(self):
-        return self.adcp_speed - self.speed
+        return self.adcp_speed - self.speed   # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     
     @property
     def R1(self):
         return np.sqrt(np.nanmean(   (1-self.tau)*self.w_H2O[self._valid]**2   +   self.tau*self.U_H2O[self._valid]**2   ))
+        # np.sqrt(np.nanmean(   (1-self.tau)*((self.w_H2O[219631:279060])[self._valid[219631:279060]])**2   +   ((self.tau*self.U_H2O[219631:279060])[self._valid[219631:279060]])**2   ))
+    
 
     ### Basic equations
     """
@@ -314,7 +325,7 @@ class SteadyState_2_Model(object):
     def model_function(self):
         self.alpha = self._solve_alpha()
         self.speed = self._solve_speed()
-        self.speed [ (self.pressure < 5) & ((self.navresource == 115)|(self.navresource == 116)) ] = 0 #Set speed to be zero at the surface
+        self.speed [ (self.external_pressure < 5) & ((self.navresource == 115)|(self.navresource == 116)) ] = 0 #Set speed to be zero at the surface
         self.speed_vert = np.sin(self.glide_angle)*self.speed
         self.speed_horz = np.cos(self.glide_angle)*self.speed 
         #self.Apply_lowpass_filter()#------------------------------------------------------!!!!!!!!!!!!!!!!!!!!
